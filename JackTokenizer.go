@@ -12,10 +12,10 @@ import (
 const KEYWORD = "keyword"
 const SYMBOL = "symbol"
 const IDENTIFIER = "identifier"
-const INT_CONST = "intConst"
-const STRING_CONST = "stringConst"
+const INT_CONST = "integerConstant"
+const STRING_CONST = "stringConstant"
 
-// Keyword constants
+/*// Keyword constants
 const CLASS = 5
 const METHOD = 6
 const FUNCTION = 7
@@ -36,7 +36,7 @@ const RETURN = 21
 const TRUE = 22
 const FALSE = 23
 const NULL = 24
-const THIS = 25
+const THIS = 25*/
 
 var tokenMap map[string]string
 
@@ -99,26 +99,24 @@ type JackTokenizer struct {
 	tokens            []Token
 }
 
-func CreateTokenizer(filename string) *JackTokenizer {
+func CreateTokenizer(inputFile *os.File) *JackTokenizer {
 	jt := &JackTokenizer{currentTokenIndex: 0, tokens: make([]Token, 0)}
-	jt.setInputFile(filename)
+	jt.setInputFile(inputFile)
 	jt.generateTokens()
 	return jt
 }
 
-func (jt *JackTokenizer) setInputFile(fileName string) {
-	f, err := os.Open(fileName)
-	checkErr(err)
-	scanner := bufio.NewScanner(f)
+func (jt *JackTokenizer) setInputFile(inputFile *os.File) {
+	scanner := bufio.NewScanner(inputFile)
 	jt.scanner = scanner
 }
 
 func (jt *JackTokenizer) generateTokens() {
 	for jt.scanner.Scan() {
 		line := strings.TrimSpace(jt.scanner.Text())
-		if len(jt.scanner.Text()) != 0 && !strings.HasPrefix(line, "/") { // skip lines that are empty or comments
-			line = strings.Split(line, "/")[0] // Remove comments from the line
-			line = strings.TrimSpace(line)     //Remove remaining white spaces
+		if len(jt.scanner.Text()) != 0 && !strings.HasPrefix(line, "/") && !strings.HasPrefix(line, "*") { // skip lines that are empty or comments
+			line = strings.Split(line, "//")[0] // Remove comments from the line
+			line = strings.TrimSpace(line)      //Remove remaining white spaces
 			i := 0
 			for i < len(line) {
 				c := line[i]
@@ -160,12 +158,16 @@ func (jt *JackTokenizer) generateTokens() {
 				if unicode.IsLetter(rune(c)) {
 					str := string(c)
 					j := i + 1
-					for unicode.IsLetter(rune(line[j])) { // build the whole word
-						str += string(line[j])
-						j++
+					for j < len(line) { // build the whole word
+						if unicode.IsLetter(rune(line[j])) {
+							str += string(line[j])
+							j++
+							continue
+						}
+						break
 					}
-					token := Token{}
 					i = j
+					token := Token{}
 					if isKeyWord(str) { //KeyWord
 						token.Type = KEYWORD
 						token.KeyWord = str
@@ -231,7 +233,7 @@ func (jt *JackTokenizer) CurrentToken() string {
 		}
 	case INT_CONST:
 		{
-			res = string(token.IntVal)
+			res = strconv.Itoa(token.IntVal)
 		}
 	case STRING_CONST:
 		{
@@ -263,11 +265,4 @@ func (jt *JackTokenizer) IntVal() int {
 
 func (jt *JackTokenizer) StringVal() string {
 	return jt.tokens[jt.currentTokenIndex].StringVal
-}
-
-// Terminates the program if there was an error while opening the input file
-func checkErr(e error) {
-	if e != nil {
-		panic(e)
-	}
 }
