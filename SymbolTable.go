@@ -1,7 +1,5 @@
 package main
 
-import "fmt"
-
 const (
 	STATIC = "static"
 	FIELD  = "field"
@@ -82,10 +80,10 @@ func (t *SymbolTable) VarCount(kind string) int {
 }
 
 func (t *SymbolTable) KindOf(name string) string {
-	fmt.Println("inside KindOf() name is " + name)
+	//fmt.Println("inside KindOf() name is " + name)
 	symbol, ok := t.symbolMap[name]
 	if !ok {
-		fmt.Println("inside KindOf() none is " + name)
+		//fmt.Println("inside KindOf() none is " + name)
 		return NONE
 	}
 	return symbol.kind

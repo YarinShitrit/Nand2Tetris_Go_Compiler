@@ -66,7 +66,7 @@ func (vmw *VMWriter) WriteIf(label string) {
 }
 
 func (vmw *VMWriter) WriteCall(name string, nArgs int) {
-	vmw.outputFile.WriteString("name " + name + " " + strconv.Itoa(nArgs) + "\n")
+	vmw.outputFile.WriteString("call " + name + " " + strconv.Itoa(nArgs) + "\n")
 }
 
 func (vmw *VMWriter) WriteFunction(name string, nArgs int) {
