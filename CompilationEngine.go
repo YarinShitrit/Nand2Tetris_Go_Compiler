@@ -8,6 +8,8 @@ import (
 
 var subroutineCallName = ""
 var subroutineCallArgs = 0
+var currentSubroutineType string
+var name = ""
 
 type CompilationEngine struct {
 	jt                    *JackTokenizer
@@ -28,13 +30,10 @@ func (cEngine *CompilationEngine) CompileClass() {
 	cEngine.subroutineSymbolTable = CreateSymbolTable()
 	cEngine.classSymbolTable.Reset()
 	cEngine.checkToken("class")
-
 	cEngine.jt.Advance() // class name
 	cEngine.currentClass = cEngine.jt.CurrentToken()
-
 	cEngine.jt.Advance()
 	cEngine.checkToken("{")
-
 	cEngine.jt.Advance()
 
 	//check for field or static variables
@@ -46,62 +45,50 @@ func (cEngine *CompilationEngine) CompileClass() {
 	for cEngine.jt.CurrentToken() == "constructor" || cEngine.jt.CurrentToken() == "function" || cEngine.jt.CurrentToken() == "method" {
 		cEngine.CompileSubroutine()
 	}
-
 	cEngine.checkToken("}")
-
 	cEngine.vmw.Close()
 }
 
 func (cEngine *CompilationEngine) CompileClassVarDec() {
 	symbolKind := cEngine.jt.CurrentToken()
-
 	cEngine.jt.Advance() // type
 	symbolType := cEngine.jt.CurrentToken()
 	cEngine.jt.Advance() // name
 	symbolName := cEngine.jt.CurrentToken()
 	cEngine.classSymbolTable.Define(symbolName, symbolType, symbolKind)
-
 	cEngine.jt.Advance()
 
 	// check for more variables of same type in this line
 	for cEngine.jt.CurrentToken() != ";" {
 		cEngine.checkToken(",")
-
 		cEngine.jt.Advance() // variable name
+		cEngine.checkTokenType(IDENTIFIER)
 		cEngine.classSymbolTable.Define(cEngine.jt.CurrentToken(), symbolType, symbolKind)
-		cEngine.writeVar()
+		cEngine.jt.Advance()
 	}
 	cEngine.checkToken(";")
-
 	cEngine.jt.Advance()
-
 }
 
 func (cEngine *CompilationEngine) CompileSubroutine() {
 	cEngine.subroutineSymbolTable.Reset()
-	switch cEngine.jt.CurrentToken() {
+	currentSubroutineType = cEngine.jt.CurrentToken()
+	switch currentSubroutineType {
 	case "constructor":
 		{
 			cEngine.jt.Advance()
 			cEngine.checkTokenType("identifier")
 			cEngine.currentSubroutine = cEngine.currentClass + ".new"
-			cEngine.vmw.WriteFunction(cEngine.currentSubroutine, cEngine.subroutineSymbolTable.argIndex)
-			cEngine.vmw.WritePush(CONSTANT, cEngine.classSymbolTable.VarCount(FIELD))
-			cEngine.vmw.WriteCall("Memory.alloc", 1)
-			cEngine.vmw.WritePop(POINTER, 0)
 			cEngine.jt.Advance() // "new"
 			cEngine.checkToken("new")
 
 		}
 	case "method":
 		{
-			cEngine.subroutineSymbolTable.Define("this", cEngine.currentClass, ARG)
-			cEngine.jt.Advance() //type
-			cEngine.jt.Advance() // method/function name
+			cEngine.jt.Advance()                     //type
+			cEngine.jt.Advance()                     // method/function name
+			cEngine.subroutineSymbolTable.argIndex++ // add "this" as argument for a method
 			cEngine.currentSubroutine = cEngine.currentClass + "." + cEngine.jt.CurrentToken()
-			cEngine.vmw.WriteFunction(cEngine.currentSubroutine, cEngine.subroutineSymbolTable.argIndex)
-			cEngine.vmw.WritePush(ARG, 0)
-			cEngine.vmw.WritePop(POINTER, 0)
 			cEngine.checkTokenType("identifier")
 		}
 	case "function":
@@ -109,22 +96,18 @@ func (cEngine *CompilationEngine) CompileSubroutine() {
 			cEngine.jt.Advance() //type
 			cEngine.jt.Advance() // method/function name
 			cEngine.currentSubroutine = cEngine.currentClass + "." + cEngine.jt.CurrentToken()
-			cEngine.vmw.WriteFunction(cEngine.currentSubroutine, cEngine.subroutineSymbolTable.argIndex)
 			cEngine.checkTokenType("identifier")
 		}
 	}
 	cEngine.jt.Advance() // "("
 	cEngine.checkToken("(")
-
 	cEngine.jt.Advance()
-	// check for parameters
 
+	// check for parameters
 	cEngine.CompileParameterList()
 	cEngine.checkToken(")")
-
 	cEngine.jt.Advance()
 	cEngine.CompileSubroutineBody()
-
 }
 
 func (cEngine *CompilationEngine) CompileSubroutineBody() {
@@ -134,13 +117,25 @@ func (cEngine *CompilationEngine) CompileSubroutineBody() {
 	for cEngine.jt.CurrentToken() == "var" {
 		cEngine.CompileVarDec()
 	}
-
+	cEngine.vmw.WriteFunction(cEngine.currentSubroutine, cEngine.subroutineSymbolTable.VarCount(VAR))
+	switch currentSubroutineType {
+	case "method":
+		{
+			cEngine.vmw.WritePush(ARG, 0)
+			cEngine.vmw.WritePop(POINTER, 0)
+		}
+	case "constructor":
+		{
+			cEngine.vmw.WritePush(CONSTANT, cEngine.classSymbolTable.VarCount(FIELD))
+			cEngine.vmw.WriteCall("Memory.alloc", 1)
+			cEngine.vmw.WritePop(POINTER, 0)
+		}
+	}
 	//check for statements
 	if cEngine.isStatement(cEngine.jt.CurrentToken()) {
 		cEngine.CompileStatements()
 	}
 	cEngine.checkToken("}")
-
 	cEngine.jt.Advance()
 }
 
@@ -174,19 +169,18 @@ func (cEngine *CompilationEngine) CompileParameterList() {
 }
 
 func (cEngine *CompilationEngine) CompileVarDec() {
-
 	cEngine.jt.Advance() // var type
 	symbolType := cEngine.jt.CurrentToken()
 	cEngine.jt.Advance() //var name
 	cEngine.checkTokenType(IDENTIFIER)
 	cEngine.subroutineSymbolTable.Define(cEngine.jt.CurrentToken(), symbolType, VAR)
-
 	cEngine.jt.Advance() // , or ;
 	for cEngine.jt.CurrentToken() == "," {
 
 		cEngine.jt.Advance() // var name
+		cEngine.checkTokenType(IDENTIFIER)
 		cEngine.subroutineSymbolTable.Define(cEngine.jt.CurrentToken(), symbolType, VAR)
-		cEngine.writeVar()
+		cEngine.jt.Advance()
 	}
 	cEngine.checkToken(";")
 
@@ -219,7 +213,6 @@ func (cEngine *CompilationEngine) CompileStatements() {
 			}
 		}
 	}
-
 }
 
 func (cEngine *CompilationEngine) CompileLet() {
@@ -236,17 +229,15 @@ func (cEngine *CompilationEngine) CompileLet() {
 	cEngine.jt.Advance() // "[" or "="
 	if cEngine.jt.CurrentToken() == "[" {
 		isArr = true
-
-		cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
 		cEngine.jt.Advance()
 		cEngine.CompileExpression()
 		cEngine.checkToken("]")
+		cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
 		cEngine.vmw.WriteArithmetic(ADD)
-
 		cEngine.jt.Advance()
 	}
 	if cEngine.jt.CurrentToken() == "=" {
-
+		//fmt.Println("var name: " + symbolName)
 		cEngine.jt.Advance()
 		cEngine.CompileExpression()
 	}
@@ -254,12 +245,12 @@ func (cEngine *CompilationEngine) CompileLet() {
 	if isArr {
 		cEngine.vmw.WritePop(TEMP, 0)
 		cEngine.vmw.WritePop(POINTER, 1)
-		cEngine.vmw.WritePop(TEMP, 0)
+		cEngine.vmw.WritePush(TEMP, 0)
 		cEngine.vmw.WritePop(THAT, 0)
 	} else {
 		cEngine.vmw.WritePop(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
+		//cEngine.vmw.WritePush(LOCAL, 0)
 	}
-
 	cEngine.jt.Advance()
 }
 
@@ -268,10 +259,12 @@ func (cEngine *CompilationEngine) CompileIf() {
 	cEngine.checkToken("(")
 	cEngine.jt.Advance()
 	cEngine.CompileExpression()
-	label1 := "IF_" + cEngine.vmw.CreateLabel()
-	label2 := "ENDIF_" + cEngine.vmw.CreateLabel()
-	cEngine.vmw.WriteArithmetic(NOT)
-	cEngine.vmw.WriteIf(label1)
+	if_true_label := "IF_" + cEngine.vmw.CreateLabel()
+	if_false_label := "FALSEIF_" + cEngine.vmw.CreateLabel()
+	if_continuation_label := "CONTIF_" + cEngine.vmw.CreateLabel()
+	cEngine.vmw.WriteIf(if_true_label)
+	cEngine.vmw.WriteGoTo(if_false_label)
+	cEngine.vmw.WriteLabel(if_true_label)
 	cEngine.checkToken(")")
 	cEngine.jt.Advance()
 	cEngine.checkToken("{")
@@ -279,119 +272,153 @@ func (cEngine *CompilationEngine) CompileIf() {
 	cEngine.CompileStatements()
 	cEngine.checkToken("}")
 	cEngine.jt.Advance() // else?
-	cEngine.vmw.WriteGoTo(label2)
-	cEngine.vmw.WriteLabel(label1)
+	elseFlag := false
 	if cEngine.jt.CurrentToken() == "else" {
-
+		elseFlag = true
+		cEngine.vmw.WriteGoTo(if_continuation_label)
 		cEngine.jt.Advance()
 		cEngine.checkToken("{")
-
+		cEngine.vmw.WriteLabel(if_false_label)
 		cEngine.jt.Advance()
 		cEngine.CompileStatements()
 		cEngine.checkToken("}")
-
 		cEngine.jt.Advance()
+	} else {
+		cEngine.vmw.WriteLabel(if_false_label)
 	}
-	cEngine.vmw.WriteLabel(label2)
-
+	if elseFlag {
+		cEngine.vmw.WriteLabel(if_continuation_label)
+	}
 }
 
 func (cEngine *CompilationEngine) CompileWhile() {
 
 	cEngine.jt.Advance() // "("
 	cEngine.checkToken("(")
-
 	cEngine.jt.Advance()
-	label1 := "WHILE_EXP_" + cEngine.vmw.CreateLabel()
-	label2 := "WHILE_END_" + cEngine.vmw.CreateLabel()
-	cEngine.vmw.WriteLabel(label1)
+	while_exp_label := "WHILE_EXP_" + cEngine.vmw.CreateLabel()
+	while_end_label := "WHILE_END_" + cEngine.vmw.CreateLabel()
+	cEngine.vmw.WriteLabel(while_exp_label)
 	cEngine.CompileExpression()
 	cEngine.checkToken(")")
-
 	cEngine.jt.Advance() // "{"
 	cEngine.checkToken("{")
 	cEngine.vmw.WriteArithmetic(NOT)
-	cEngine.vmw.WriteIf(label2)
-
+	cEngine.vmw.WriteIf(while_end_label)
 	cEngine.jt.Advance()
 	cEngine.CompileStatements()
 	cEngine.checkToken("}")
-	cEngine.vmw.WriteGoTo(label1)
-
-	cEngine.vmw.WriteLabel(label2)
+	cEngine.vmw.WriteGoTo(while_exp_label)
+	cEngine.vmw.WriteLabel(while_end_label)
 	cEngine.jt.Advance()
 }
 
 func (cEngine *CompilationEngine) CompileDo() {
-
 	cEngine.jt.Advance() // subroutineName or className/varName
+	symbolName := cEngine.jt.CurrentToken()
+	name = symbolName
+	symbolType := cEngine.subroutineSymbolTable.TypeOf(symbolName)
+	symbolKind := cEngine.subroutineSymbolTable.KindOf(symbolName)
+	if symbolKind == NONE { //try get it from class level
+		symbolType = cEngine.classSymbolTable.TypeOf(symbolName)
+	}
+	if symbolType == "" {
+		subroutineCallName = symbolName
+	} else {
+		subroutineCallName = symbolType
+	}
 	cEngine.checkTokenType("identifier")
 	if _, ok := cEngine.classSymbolTable.symbolMap[cEngine.jt.CurrentToken()]; ok {
 		// if we call surboutine on field/static var it also gets "this" as argument
 		subroutineCallArgs++
-	}
-
-	if cEngine.jt.CurrentToken() == cEngine.currentClass {
+	} else if symbolType != "" {
 		subroutineCallArgs++
 	}
-	cEngine.CompileExpression()
+	if cEngine.jt.CurrentToken() == cEngine.currentClass && cEngine.currentClass != "Main" {
+		subroutineCallArgs++
+	}
+	cEngine.jt.Advance()
+	if cEngine.jt.CurrentToken() == "(" {
+		subroutineCallArgs++
+	}
+	cEngine.CompileSubroutineCall()
 	cEngine.checkToken(";")
 	cEngine.vmw.WritePop(TEMP, 0) // pop the return value
 	cEngine.jt.Advance()
 }
 
 func (cEngine *CompilationEngine) CompileReturn() {
-
 	cEngine.jt.Advance() // ; or experssion
 	if cEngine.jt.CurrentToken() == ";" {
 		cEngine.vmw.WritePush(CONSTANT, 0)
-
 	} else {
-		cEngine.CompileExpression()
+		switch cEngine.jt.CurrentToken() {
+		case "this":
+			{
+				cEngine.vmw.WritePush(POINTER, 0)
+				cEngine.jt.Advance()
+			}
+		case "null", "false":
+			{
+				cEngine.vmw.WritePush(CONSTANT, 0)
+				cEngine.jt.Advance()
+			}
+		case "true":
+			{
+				cEngine.vmw.WritePush(CONSTANT, 1)
+				cEngine.vmw.WriteArithmetic(NEG)
+				cEngine.jt.Advance()
+			}
+		default:
+			{
+				cEngine.CompileExpression()
+			}
+		}
 		cEngine.checkToken(";")
-
 	}
 	cEngine.vmw.WriteReturn()
-
 	cEngine.jt.Advance()
 }
 
 func (cEngine *CompilationEngine) CompileExpression() {
-
 	cEngine.CompileTerm()
 	for cEngine.isOp(cEngine.jt.CurrentToken()) {
 		opCmd := cEngine.CompileOp()
 		cEngine.CompileTerm()
 		cEngine.vmw.outputFile.WriteString(opCmd + "\n")
 	}
-
 }
 
 func (cEngine *CompilationEngine) CompileTerm() {
-
 	switch cEngine.jt.CurrentToken() {
 	case "this":
 		{
 			cEngine.vmw.WritePush(POINTER, 0)
+			cEngine.jt.Advance()
+			return
 		}
 	case "null", "false":
 		{
 			cEngine.vmw.WritePush(CONSTANT, 0)
+			cEngine.jt.Advance()
+			return
 		}
 	case "true":
 		{
-			cEngine.vmw.WritePush(CONSTANT, 1)
-			cEngine.vmw.WriteArithmetic(NEG)
+			cEngine.vmw.WritePush(CONSTANT, 0)
+			cEngine.vmw.WriteArithmetic(NOT)
+			cEngine.jt.Advance()
+			return
 		}
 	}
 	if cEngine.jt.CurrentToken() == "~" || cEngine.jt.CurrentToken() == "-" { //unaryOp term
-
+		op := cEngine.jt.CurrentToken()
 		cEngine.jt.Advance()
 		cEngine.CompileTerm()
-		if cEngine.jt.CurrentToken() == "~" {
-			cEngine.vmw.WriteArithmetic(NEG)
-		} else {
+		if op == "~" {
 			cEngine.vmw.WriteArithmetic(NOT)
+		} else {
+			cEngine.vmw.WriteArithmetic(NEG)
 		}
 	} else if cEngine.jt.TokenType() == STRING_CONST ||
 		cEngine.jt.TokenType() == INT_CONST ||
@@ -411,10 +438,18 @@ func (cEngine *CompilationEngine) CompileTerm() {
 		cEngine.jt.Advance()
 	} else if varType := cEngine.jt.TokenType(); varType == "identifier" { //varName or subroutineCall
 		varName := cEngine.jt.CurrentToken()
-		//fmt.Println("var name is " + varName)
+		name = varName
 		cEngine.jt.Advance()
 		if cEngine.jt.CurrentToken() == "(" || cEngine.jt.CurrentToken() == "." { // subroutineCall
-			subroutineCallName = strings.Title(varName)
+			subroutineCallName += varName
+			symbolType := cEngine.subroutineSymbolTable.TypeOf(varName)
+			symbolKind := cEngine.subroutineSymbolTable.KindOf(varName)
+			if symbolKind == NONE { //try get it from class level
+				symbolType = cEngine.classSymbolTable.TypeOf(varName)
+			}
+			if symbolType != "" {
+				subroutineCallArgs++
+			}
 			cEngine.CompileSubroutineCall()
 		} else {
 			symbolKind := cEngine.subroutineSymbolTable.KindOf(varName)
@@ -423,30 +458,28 @@ func (cEngine *CompilationEngine) CompileTerm() {
 				symbolKind = cEngine.classSymbolTable.KindOf(varName)
 				symbolIndex = cEngine.classSymbolTable.IndexOf(varName)
 			}
-			cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
 			if cEngine.jt.CurrentToken() == "[" { // varName [experssion]
-
 				cEngine.jt.Advance()
 				cEngine.CompileExpression()
 				cEngine.checkToken("]")
+				cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
 				cEngine.vmw.WriteArithmetic(ADD)
 				cEngine.vmw.WritePop(POINTER, 1)
 				cEngine.vmw.WritePush(THAT, 0)
 				cEngine.jt.Advance()
+			} else {
+				cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(symbolKind), symbolIndex)
 			}
 		}
 	} else if cEngine.jt.CurrentToken() == "(" { // (expression)
-
 		cEngine.jt.Advance()
 		cEngine.CompileExpression()
 		cEngine.checkToken(")")
 		cEngine.jt.Advance()
 	}
-
 }
 
 func (cEngine *CompilationEngine) CompileExpressionList() int {
-
 	sum := 0
 	if cEngine.jt.CurrentToken() != ")" { // no more experssions
 		sum++
@@ -457,29 +490,48 @@ func (cEngine *CompilationEngine) CompileExpressionList() int {
 			sum++
 		}
 	}
-
 	return sum
 }
 
 func (cEngine *CompilationEngine) CompileSubroutineCall() {
-	name := ""
-	if cEngine.jt.TokenType() == IDENTIFIER {
-		name = cEngine.jt.CurrentToken()
-		cEngine.jt.Advance() // "." or subroutineName
-	}
+	pushPointerFlag := false
+	pushThisFlag := false
 	if cEngine.jt.CurrentToken() == "." {
 		cEngine.jt.Advance() // subrountineName
-		subroutineCallName += strings.Title(name) + "." + cEngine.jt.CurrentToken()
+		subroutineCallName = strings.Title(subroutineCallName) + "." + cEngine.jt.CurrentToken()
 		cEngine.jt.Advance()
 	} else {
-		subroutineCallName += strings.Title(cEngine.currentClass) + "." + name
+		if cEngine.currentClass != "Main" {
+			pushPointerFlag = true
+		}
+		pushThisFlag = true
+		subroutineCallName = strings.Title(cEngine.currentClass) + "." + subroutineCallName
+	}
+	varKind := cEngine.subroutineSymbolTable.KindOf(name)
+	varIndex := cEngine.subroutineSymbolTable.IndexOf(name)
+	if varKind == NONE { // check if the var is in the class scope
+		varIndex = cEngine.classSymbolTable.IndexOf(name)
+		varKind = cEngine.classSymbolTable.KindOf(name)
+	}
+	if varKind != NONE {
+		cEngine.vmw.WritePush(cEngine.vmw.getSegmentOf(varKind), varIndex)
 	}
 	cEngine.checkToken("(")
 	cEngine.jt.Advance()
+	if pushPointerFlag {
+		cEngine.vmw.WritePush(POINTER, 0)
+	} else if pushThisFlag {
+		fmt.Println(cEngine.currentClass)
+		if cEngine.currentClass != "Main" {
+			subroutineCallArgs++ // add "this" as argument
+		}
+		cEngine.vmw.WritePush(THIS, 0)
+	}
 	subroutineCallArgs += cEngine.CompileExpressionList()
 	cEngine.checkToken(")")
 	cEngine.vmw.WriteCall(subroutineCallName, subroutineCallArgs)
 	cEngine.jt.Advance()
+	name = ""
 	subroutineCallName = ""
 	subroutineCallArgs = 0
 }
@@ -537,12 +589,6 @@ func (cEngine *CompilationEngine) CompileOp() string {
 	return opCmd
 }
 
-func (cEngine *CompilationEngine) writeVar() {
-	cEngine.checkTokenType(IDENTIFIER)
-
-	cEngine.jt.Advance()
-}
-
 func (cEngine *CompilationEngine) checkToken(token string) {
 	if cEngine.jt.CurrentToken() != token {
 		fmt.Println("compilation error - expected " + token + " but recevied " + cEngine.jt.CurrentToken())
@@ -581,12 +627,4 @@ func (cEngine *CompilationEngine) isStatement(token string) bool {
 		return true
 	}
 	return false
-}
-
-func tabber(num int) string {
-	tabber := ""
-	for i := 0; i < num; i++ {
-		tabber += "  "
-	}
-	return tabber
 }

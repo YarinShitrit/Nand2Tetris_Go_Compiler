@@ -34,7 +34,7 @@ func main() {
 			fileStructure := strings.Split(file.Name(), ".")
 			if fileStructure[1] == "jack" {
 				input, _ := os.Open(fileOrDir + "/" + file.Name())
-				output, _ := os.Create(fileOrDir + "/" + fileStructure[0] + ".vm")
+				output, _ := os.Create(fileOrDir + "/" + fileStructure[0] + "1.vm")
 				cEngine := CreateCompilationEngine(input, output)
 				cEngine.CompileClass()
 			}
@@ -42,7 +42,7 @@ func main() {
 
 	} else { // is file
 		input, _ := os.Open(fileOrDir)
-		output, _ := os.Create(strings.Split(fileOrDir, ".")[0] + ".vm")
+		output, _ := os.Create(strings.Split(fileOrDir, ".")[0] + "1.vm")
 		cEngine := CreateCompilationEngine(input, output)
 		cEngine.CompileClass()
 	}
